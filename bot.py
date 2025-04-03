@@ -22,7 +22,6 @@ def start_health_server():
 threading.Thread(target=start_health_server, daemon=True).start()
 
 print("The Bot is now active...")
-app.run()
 
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
