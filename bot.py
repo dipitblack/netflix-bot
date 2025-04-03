@@ -4,11 +4,30 @@ from pyrogram.enums import ParseMode
 from modules.reset import extract_latest_netflix_reset_link
 from modules.signin import extract_latest_netflix_signin_code
 from database import init_db, add_emails, remove_email, get_emails, block_user, unblock_user, is_blocked, update_gmail_credentials, get_gmail_credentials
+import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 
-API_ID = "2104057670"
-API_HASH = "bf87adfbc2c24c66904f3c36f3c0af3a"
-BOT_TOKEN = "7521862287:AAEnZbQv72I6ATVkSWNpBrfQQKBBn7a3ju8"
-ADMIN_ID = 123456789  # Replace with your Telegram user ID (integer)
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is alive")
+
+def start_health_server():
+    server = HTTPServer(("", 8080), HealthCheckHandler)
+    server.serve_forever()
+
+threading.Thread(target=start_health_server, daemon=True).start()
+
+print("The Bot is now active...")
+app.run()
+
+API_ID = os.environ.get("API_ID")
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_ID = int(os.environ.get("ADMIN_ID"))
 
 app = Client("netflix_reset_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
