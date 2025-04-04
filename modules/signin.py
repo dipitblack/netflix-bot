@@ -32,10 +32,12 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
 
         # Search for emails from Netflix containing "sign-in code" within the last hour
         since_date = (datetime.now() - timedelta(hours=1)).strftime("%d-%b-%Y")
+        search_query = f'FROM "info@account.netflix.com" "sign-in code" SINCE {since_date}'
         try:
-            result, data = mail.search(None, f'(FROM "info@account.netflix.com" "sign-in code" SINCE "{since_date}")')
+            # Use charset=None to avoid encoding issues, as Gmail typically handles utf-8 by default
+            result, data = mail.search(None, search_query)
             if result != "OK":
-                return None, "IMAP Error: Failed to search for emails."
+                return None, f"IMAP Error: Failed to search for emails. {result}"
             email_ids = data[0].split()
         except imaplib.IMAP4.error as e:
             return None, f"IMAP Error: Failed to search emails. {str(e)}"
