@@ -3,22 +3,46 @@ import email
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 import re
+import socket
 
 def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_email):
     mail = None
     try:
-        imap_server = "imap.gmail.com"
-        mail = imaplib.IMAP4_SSL(imap_server, 993)
-        mail.login(gmail_email, gmail_app_password)
-        mail.select("inbox")
+        # Set a timeout for the connection (10 seconds)
+        imaplib.IMAP4_SSL.socket.setdefaulttimeout(10)
 
-        result, data = mail.search(None, '(FROM "info@account.netflix.com" "sign-in code")')
-        email_ids = data[0].split()
+        # Connect to Gmail IMAP server with improved error handling
+        imap_server = "imap.gmail.com"
+        try:
+            mail = imaplib.IMAP4_SSL(imap_server, 993)
+        except (socket.timeout, ConnectionError) as e:
+            return None, f"Connection Error: Failed to connect to {imap_server}. {str(e)}"
+
+        # Attempt to login with better error handling
+        try:
+            mail.login(gmail_email, gmail_app_password)
+        except imaplib.IMAP4.error as e:
+            return None, f"Login Error: Failed to authenticate with Gmail. {str(e)}"
+
+        # Select the inbox
+        try:
+            mail.select("inbox", readonly=True)  # Readonly to avoid modifying emails
+        except imaplib.IMAP4.error as e:
+            return None, f"IMAP Error: Failed to select inbox. {str(e)}"
+
+        # Search for emails from Netflix containing "sign-in code"
+        try:
+            result, data = mail.search(None, '(FROM "info@account.netflix.com" "sign-in code")')
+            if result != "OK":
+                return None, "IMAP Error: Failed to search for emails."
+            email_ids = data[0].split()
+        except imaplib.IMAP4.error as e:
+            return None, f"IMAP Error: Failed to search emails. {str(e)}"
 
         if not email_ids:
             return None, "No Netflix sign-in code emails found in the archives."
 
-        email_ids = email_ids[::-1]
+        email_ids = email_ids[::-1]  # Process most recent emails first
 
         for email_id in email_ids:
             try:
@@ -50,7 +74,7 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
                     if not email_body:
                         continue
 
-                    code_match = re.search(r'\b\d{6}\b', email_body)
+                    code_match = re.search(r'\b\d{4}\b', email_body)
                     if code_match:
                         return code_match.group(0), None
                     return None, f"No sign-in code found in the email to {target_email}."
@@ -67,6 +91,7 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
     finally:
         if mail:
             try:
-                mail.logout()
+                mail.close()  # Close the selected mailbox
+                mail.logout()  # Properly logout
             except:
                 pass
