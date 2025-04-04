@@ -93,3 +93,19 @@ def get_gmail_credentials():
     result = c.fetchone()
     conn.close()
     return result if result else ("mdnehal0911@gmail.com", "tlxv hyjj ylro kclo")
+
+def get_all_users():
+    conn = sqlite3.connect("netflix_bot.db")
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT user_id FROM whitelist")
+    result = c.fetchall()
+    conn.close()
+    return [row[0] for row in result]
+
+def get_blocked_users():
+    conn = sqlite3.connect("netflix_bot.db")
+    c = conn.cursor()
+    c.execute("SELECT user_id FROM blocked_users")
+    result = c.fetchall()
+    conn.close()
+    return [row[0] for row in result]
