@@ -30,9 +30,10 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
         except imaplib.IMAP4.error as e:
             return None, f"IMAP Error: Failed to select inbox. {str(e)}"
 
-        # Search for emails from Netflix containing "sign-in code"
+        # Search for emails from Netflix containing "sign-in code" within the last hour
+        since_date = (datetime.now() - timedelta(hours=1)).strftime("%d-%b-%Y")
         try:
-            result, data = mail.search(None, '(FROM "info@account.netflix.com" "sign-in code")')
+            result, data = mail.search(None, f'(FROM "info@account.netflix.com" "sign-in code" SINCE "{since_date}")')
             if result != "OK":
                 return None, "IMAP Error: Failed to search for emails."
             email_ids = data[0].split()
@@ -40,7 +41,7 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
             return None, f"IMAP Error: Failed to search emails. {str(e)}"
 
         if not email_ids:
-            return None, "No Netflix sign-in code emails found in the archives."
+            return None, "No recent Netflix sign-in code emails found (within the last hour)."
 
         email_ids = email_ids[::-1]  # Process most recent emails first
 
@@ -54,35 +55,39 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
                 msg = email.message_from_bytes(raw_email)
 
                 to_field = msg.get("To", "").strip()
-                if target_email.lower() in to_field.lower():
-                    date_str = msg.get("Date")
-                    if date_str:
-                        email_date = parsedate_to_datetime(date_str)
-                        current_time = datetime.now(email_date.tzinfo)
-                        if current_time - email_date > timedelta(hours=1):
-                            return None, f"The sign-in code for {target_email} has expired (over 1 hour old). Please request a new one."
+                if target_email.lower() not in to_field.lower():
+                    continue
 
-                    email_body = ""
-                    if msg.is_multipart():
-                        for part in msg.walk():
-                            content_type = part.get_content_type()
-                            content_disposition = str(part.get("Content-Disposition"))
-                            if content_type == "text/plain" and "attachment" not in content_disposition:
-                                email_body = part.get_payload(decode=True).decode(errors="ignore")
-                                break
+                date_str = msg.get("Date")
+                if date_str:
+                    email_date = parsedate_to_datetime(date_str)
+                    current_time = datetime.now(email_date.tzinfo)
+                    if current_time - email_date > timedelta(hours=1):
+                        return None, f"The sign-in code for {target_email} has expired (over 1 hour old). Please request a new one."
 
-                    if not email_body:
-                        continue
+                email_body = ""
+                if msg.is_multipart():
+                    for part in msg.walk():
+                        content_type = part.get_content_type()
+                        content_disposition = str(part.get("Content-Disposition"))
+                        if content_type == "text/plain" and "attachment" not in content_disposition:
+                            email_body = part.get_payload(decode=True).decode(errors="ignore")
+                            break
+                else:
+                    email_body = msg.get_payload(decode=True).decode(errors="ignore")
 
-                    code_match = re.search(r'\b\d{4}\b', email_body)
-                    if code_match:
-                        return code_match.group(0), None
-                    return None, f"No sign-in code found in the email to {target_email}."
+                if not email_body:
+                    continue
+
+                code_match = re.search(r'\b\d{4}\b', email_body)
+                if code_match:
+                    return code_match.group(0), None
+                return None, f"No sign-in code found in the email to {target_email}."
 
             except imaplib.IMAP4.error:
                 continue
 
-        return None, f"No sign-in code emails found addressed to {target_email}."
+        return None, f"No recent sign-in code emails found addressed to {target_email} (within the last hour)."
 
     except imaplib.IMAP4.error as e:
         return None, f"IMAP Error: {str(e)}. Unable to connect to the server."
