@@ -8,8 +8,8 @@ import socket
 def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_email):
     mail = None
     try:
-        # Set a timeout for the connection (10 seconds)
-        imaplib.IMAP4_SSL.socket.setdefaulttimeout(10)
+        # Set a global socket timeout (10 seconds) for all network operations
+        socket.setdefaulttimeout(10)
 
         # Connect to Gmail IMAP server with improved error handling
         imap_server = "imap.gmail.com"
