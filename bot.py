@@ -32,16 +32,6 @@ app = Client("netflix_reset_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BO
 
 init_db()
 
-def is_authorized(user_id, target_email=None):
-    """Check if user is authorized to access the email"""
-    if user_id == ADMIN_ID:
-        return True  # Owner is always authorized
-    if is_blocked(user_id):
-        return False
-    if not target_email:
-        return bool(get_emails(user_id))
-    return target_email in get_emails(user_id)
-
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
     sender_id = message.from_user.id
@@ -53,7 +43,8 @@ async def start_command(client, message):
         "- `/reset <email>` - Get your password reset link\n"
         "- `/signin <email>` - Get your sign-in code\n"
         "- `/mymails` - View your whitelisted emails\n\n"
-        "📝 **Note:** All links and codes are valid for emails received within the last hour."
+        "📝 **Note:** All links and codes are valid for emails received within the last hour.\n"
+        "Contact our admin to get whitelisted and start using the bot!"
     )
     
     if sender_id == ADMIN_ID:
@@ -75,200 +66,246 @@ async def start_command(client, message):
 
 @app.on_message(filters.command("add") & filters.user(ADMIN_ID))
 async def add_command(client, message):
+    command_parts = message.text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await message.reply_text("**Error:** Use: `/add <user_id> email1 email2 ...`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    text = command_parts[1].strip()
+    parts = text.split(maxsplit=1)
     try:
-        command_parts = message.text.split(maxsplit=2)
-        if len(command_parts) < 3:
-            raise ValueError("Invalid format")
-            
-        user_id = int(command_parts[1])
-        emails = [email.strip() for email in command_parts[2].split() if '@' in email]
-        
-        if not emails:
-            raise ValueError("No valid emails provided")
-            
-        add_emails(user_id, emails)
-        email_list = "\n".join([f"- `{email}`" for email in get_emails(user_id)])
-        
-        await message.reply_text(
-            f"✅ Successfully added emails for user {user_id}:\n{email_list}",
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except Exception as e:
-        await message.reply_text(
-            f"❌ Error: {str(e)}\nUsage: `/add <user_id> email1 email2 ...`",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        user_id = int(parts[0].strip())
+    except ValueError:
+        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    if len(parts) < 2:
+        await message.reply_text("**Error:** Provide at least one email.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    emails_text = parts[1].strip()
+    new_emails = [email.strip() for email in emails_text.split() if '@' in email]
+
+    if not new_emails:
+        await message.reply_text("**Error:** No valid email addresses provided.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    add_emails(user_id, new_emails)
+    email_list = "\n".join([f"- `{email}`" for email in get_emails(user_id)])
+    await message.reply_text(
+        f"**Success:** User ID `{user_id}` updated with:\n{email_list}",
+        parse_mode=ParseMode.MARKDOWN
+    )
 
 @app.on_message(filters.command("remove") & filters.user(ADMIN_ID))
 async def remove_command(client, message):
+    command_parts = message.text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await message.reply_text("**Error:** Use: `/remove <user_id> <email>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    parts = command_parts[1].split(maxsplit=1)
+    if len(parts) < 2:
+        await message.reply_text("**Error:** Use: `/remove <user_id> <email>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
     try:
-        command_parts = message.text.split(maxsplit=2)
-        if len(command_parts) < 3:
-            raise ValueError("Invalid format")
-            
-        user_id = int(command_parts[1])
-        target_email = command_parts[2].strip()
-        
-        if not remove_email(user_id, target_email):
-            raise ValueError("Email not found for this user")
-            
-        remaining_emails = get_emails(user_id)
-        response = f"✅ Removed `{target_email}` from user {user_id}"
-        
-        if remaining_emails:
-            email_list = "\n".join([f"- `{email}`" for email in remaining_emails])
-            response += f"\nRemaining emails:\n{email_list}"
-        else:
-            response += "\nNo emails remaining for this user"
-            
-        await message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        await message.reply_text(
-            f"❌ Error: {str(e)}\nUsage: `/remove <user_id> <email>`",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        user_id = int(parts[0].strip())
+    except ValueError:
+        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    target_email = parts[1].strip()
+    if remove_email(user_id, target_email):
+        email_list = "\n".join([f"- `{email}`" for email in get_emails(user_id)])
+        response_text = f"**Success:** Removed `{target_email}` from User ID `{user_id}`.\nRemaining emails:\n{email_list}" if email_list else f"**Success:** Removed `{target_email}` from User ID `{user_id}`. No emails remain."
+        await message.reply_text(response_text, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await message.reply_text(f"**Error:** Email not found in User ID `{user_id}`'s whitelist.", parse_mode=ParseMode.MARKDOWN)
 
 @app.on_message(filters.command("mymails"))
 async def mymails_command(client, message):
     sender_id = message.from_user.id
-    
-    if not is_authorized(sender_id):
-        await message.reply_text("❌ You are not authorized to use this command", parse_mode=ParseMode.MARKDOWN)
+    if is_blocked(sender_id):
+        await message.reply_text("**Error:** You are blocked from using this bot.", parse_mode=ParseMode.MARKDOWN)
         return
-        
-    emails = get_emails(sender_id)
-    
-    if not emails and sender_id != ADMIN_ID:
-        await message.reply_text("ℹ️ You don't have any whitelisted emails. Contact admin.", parse_mode=ParseMode.MARKDOWN)
-        return
-        
-    email_list = "\n".join([f"- `{email}`" for email in emails]) if emails else "- No emails (owner has full access)"
-    await message.reply_text(
-        f"📧 Your authorized emails (User ID: `{sender_id}`):\n{email_list}",
-        parse_mode=ParseMode.MARKDOWN
-    )
 
-@app.on_message(filters.command(["block", "unblock", "check"]) & filters.user(ADMIN_ID))
-async def admin_management_commands(client, message):
+    emails = get_emails(sender_id)
+    if not emails:
+        await message.reply_text("**Error:** You are not whitelisted. Contact the admin.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    email_list = "\n".join([f"- `{email}`" for email in emails])
+    response_text = (
+        f"**Your Whitelisted Emails:**\n"
+        f"Associated with your account (ID: `{sender_id}`):\n"
+        f"{email_list}"
+    )
+    await message.reply_text(response_text, parse_mode=ParseMode.MARKDOWN)
+
+@app.on_message(filters.command("block") & filters.user(ADMIN_ID))
+async def block_command(client, message):
+    command_parts = message.text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await message.reply_text("**Error:** Use: `/block <user_id>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
     try:
-        command = message.command[0]
-        user_id = int(message.command[1])
-        
-        if command == "block":
-            block_user(user_id)
-            action = "blocked"
-        elif command == "unblock":
-            unblock_user(user_id)
-            action = "unblocked"
-        else:  # check command
-            emails = get_emails(user_id)
-            email_list = "\n".join([f"- `{email}`" for email in emails]) if emails else "- No emails"
-            await message.reply_text(
-                f"📋 Whitelisted emails for user {user_id}:\n{email_list}",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-            
-        await message.reply_text(f"✅ User {user_id} has been {action}", parse_mode=ParseMode.MARKDOWN)
-    except Exception as e:
-        await message.reply_text(
-            f"❌ Error: {str(e)}\nUsage: `/{message.command[0]} <user_id>`",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        user_id = int(command_parts[1].strip())
+    except ValueError:
+        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    block_user(user_id)
+    await message.reply_text(f"**Success:** User ID `{user_id}` has been blocked.", parse_mode=ParseMode.MARKDOWN)
+
+@app.on_message(filters.command("unblock") & filters.user(ADMIN_ID))
+async def unblock_command(client, message):
+    command_parts = message.text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await message.reply_text("**Error:** Use: `/unblock <user_id>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    try:
+        user_id = int(command_parts[1].strip())
+    except ValueError:
+        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    unblock_user(user_id)
+    await message.reply_text(f"**Success:** User ID `{user_id}` has been unblocked.", parse_mode=ParseMode.MARKDOWN)
+
+@app.on_message(filters.command("check") & filters.user(ADMIN_ID))
+async def check_command(client, message):
+    command_parts = message.text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await message.reply_text("**Error:** Use: `/check <user_id>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    try:
+        user_id = int(command_parts[1].strip())
+    except ValueError:
+        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    emails = get_emails(user_id)
+    if not emails:
+        await message.reply_text(f"**Info:** User ID `{user_id}` has no whitelisted emails.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    email_list = "\n".join([f"- `{email}`" for email in emails])
+    response_text = (
+        f"**Whitelisted Emails for User ID `{user_id}`:**\n"
+        f"{email_list}"
+    )
+    await message.reply_text(response_text, parse_mode=ParseMode.MARKDOWN)
 
 @app.on_message(filters.command("stats") & filters.user(ADMIN_ID))
 async def stats_command(client, message):
-    users = get_all_users()
-    blocked = get_blocked_users()
-    
-    stats = (
-        "📊 **Bot Statistics**\n\n"
-        f"👥 Total users: `{len(users)}`\n"
-        f"🚫 Blocked users: `{len(blocked)}`\n"
-        f"✅ Active users: `{len(users) - len(blocked)}`\n\n"
-        "🔍 Use `/check <user_id>` to view specific user details"
+    total_users = len(get_all_users())
+    blocked_users = len(get_blocked_users())
+    whitelisted_users = len([user for user in get_all_users() if get_emails(user)])
+
+    stats_text = (
+        "**📊 Bot Statistics 📊**\n\n"
+        f"👥 **Total Users:** `{total_users}`\n"
+        f"✅ **Whitelisted Users:** `{whitelisted_users}`\n"
+        f"🚫 **Blocked Users:** `{blocked_users}`\n"
+        f"📧 **Active Users (not blocked):** `{total_users - blocked_users}`"
     )
-    
-    await message.reply_text(stats, parse_mode=ParseMode.MARKDOWN)
+    await message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
 
 @app.on_message(filters.command("gmail") & filters.user(ADMIN_ID))
 async def gmail_command(client, message):
-    try:
-        credentials = message.text.split(maxsplit=1)[1].strip()
-        if ':' not in credentials:
-            raise ValueError("Invalid format")
-            
-        email, password = credentials.split(':', 1)
-        update_gmail_credentials(email.strip(), password.strip())
-        
-        await message.reply_text(
-            f"✅ Gmail credentials updated to: `{email}`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except Exception as e:
-        await message.reply_text(
-            f"❌ Error: {str(e)}\nUsage: `/gmail <email>:<app_password>`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-
-async def process_email_request(client, message, command_type):
-    sender_id = message.from_user.id
-    
-    if not is_authorized(sender_id):
-        await message.reply_text("❌ You are not authorized to use this bot", parse_mode=ParseMode.MARKDOWN)
+    command_parts = message.text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await message.reply_text("**Error:** Use: `/gmail <email>:<app_password>`", parse_mode=ParseMode.MARKDOWN)
         return
-        
-    try:
-        target_email = message.text.split(maxsplit=1)[1].strip()
-        
-        # For non-admin users, verify the email is in their whitelist
-        if sender_id != ADMIN_ID and target_email not in get_emails(sender_id):
-            await message.reply_text("❌ This email is not in your whitelist", parse_mode=ParseMode.MARKDOWN)
-            return
-            
-        gmail_email, gmail_app_password = get_gmail_credentials()
-        processing_msg = await message.reply_text("⏳ Processing your request...", parse_mode=ParseMode.MARKDOWN)
-        
-        if command_type == "reset":
-            result, error = extract_latest_netflix_reset_link(gmail_email, gmail_app_password, target_email)
-            if result:
-                buttons = InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Reset Password", url=result)]])
-                await processing_msg.edit_text(
-                    f"✅ Password reset link for `{target_email}`",
-                    reply_markup=buttons,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            else:
-                await processing_msg.edit_text(f"❌ {error}", parse_mode=ParseMode.MARKDOWN)
-        else:  # signin
-            result, error = extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_email)
-            if result:
-                await processing_msg.edit_text(
-                    f"✅ Sign-in code for `{target_email}`:\n\n"
-                    f"**Code:** `{result}`\n"
-                    "This code is valid for 15 minutes",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            else:
-                await processing_msg.edit_text(f"❌ {error}", parse_mode=ParseMode.MARKDOWN)
-    except IndexError:
-        await message.reply_text(
-            f"❌ Usage: `/{command_type} <email>`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except Exception as e:
-        await message.reply_text(
-            f"❌ An error occurred: {str(e)}",
-            parse_mode=ParseMode.MARKDOWN
-        )
+
+    text = command_parts[1].strip()
+    if ':' not in text:
+        await message.reply_text("**Error:** Invalid format. Use: `/gmail <email>:<app_password>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    email, app_password = text.split(':', 1)
+    update_gmail_credentials(email.strip(), app_password.strip())
+    await message.reply_text(f"**Success:** Gmail credentials updated to `{email}`.", parse_mode=ParseMode.MARKDOWN)
 
 @app.on_message(filters.command("reset"))
 async def reset_command(client, message):
-    await process_email_request(client, message, "reset")
+    command_parts = message.text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await message.reply_text("**Error:** Use: `/reset <email>`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    sender_id = message.from_user.id
+    if is_blocked(sender_id):
+        await message.reply_text("**Error:** You are blocked from using this bot.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    target_email = command_parts[1].strip()
+    
+    # Check if the sender is the admin
+    if sender_id != ADMIN_ID:
+        # For non-admin users, check if the email is whitelisted
+        emails = get_emails(sender_id)
+        if not emails or target_email not in emails:
+            await message.reply_text("**Error:** Email not in your whitelist or you’re not authorized.", parse_mode=ParseMode.MARKDOWN)
+            return
+
+    # If the sender is admin, they can bypass the whitelist check
+    gmail_email, gmail_app_password = get_gmail_credentials()
+    sending_msg = await message.reply_text("**Sending...** Processing your request.", parse_mode=ParseMode.MARKDOWN)
+    reset_link, error_message = extract_latest_netflix_reset_link(gmail_email, gmail_app_password, target_email)
+
+    if reset_link:
+        response_text = (
+            f"**Success!** Reset link for `{target_email}`:\n\n"
+            "**Click below to reset your password.**"
+        )
+        buttons = InlineKeyboardMarkup([[InlineKeyboardButton("Reset Password", url=reset_link)]])
+        await sending_msg.edit_text(response_text, reply_markup=buttons, parse_mode=ParseMode.MARKDOWN)
+    else:
+        response_text = f"**Error:** {error_message}"
+        await sending_msg.edit_text(response_text, parse_mode=ParseMode.MARKDOWN)
 
 @app.on_message(filters.command("signin"))
 async def signin_command(client, message):
-    await process_email_request(client, message, "signin")
+    command_parts = message.text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await message.reply_text("**Error:** Use: `/signin <email>`", parse_mode=ParseMode.MARKDOWN)
+        return
 
-print("Bot is running...")
+    sender_id = message.from_user.id
+    if is_blocked(sender_id):
+        moving = await message.reply_text("**Error:** You are blocked from using this bot.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    target_email = command_parts[1].strip()
+    
+    # Check if the sender is the admin
+    if sender_id != ADMIN_ID:
+        # For non-admin users, check if the email is whitelisted
+        emails = get_emails(sender_id)
+        if not emails or target_email not in emails:
+            await message.reply_text("**Error:** Email not in your whitelist or you’re not authorized.", parse_mode=ParseMode.MARKDOWN)
+            return
+
+    # If the sender is admin, they can bypass the whitelist check
+    gmail_email, gmail_app_password = get_gmail_credentials()
+    sending_msg = await message.reply_text("**Sending...** Processing your request.", parse_mode=ParseMode.MARKDOWN)
+    signin_code, error_message = extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_email)
+
+    if signin_code:
+        response_text = (
+            f"**Success!** Sign-in code for `{target_email}`:\n\n"
+            f"**Code:** `{signin_code}`\n"
+            "__Use this code to sign in to Netflix.__"
+        )
+        await sending_msg.edit_text(response_text, parse_mode=ParseMode.MARKDOWN)
+    else:
+        response_text = f"**Error:** {error_message}"
+        await sending_msg.edit_text(response_text, parse_mode=ParseMode.MARKDOWN)
+
+print("The Bot is now active...")
 app.run()
