@@ -8,33 +8,28 @@ import socket
 def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_email):
     mail = None
     try:
-        # Set a global socket timeout (10 seconds) for all network operations
         socket.setdefaulttimeout(10)
-
-        # Connect to Gmail IMAP server with improved error handling
         imap_server = "imap.gmail.com"
+
         try:
             mail = imaplib.IMAP4_SSL(imap_server, 993)
         except (socket.timeout, ConnectionError) as e:
             return None, f"Connection Error: Failed to connect to {imap_server}. {str(e)}"
 
-        # Attempt to login with better error handling
         try:
             mail.login(gmail_email, gmail_app_password)
         except imaplib.IMAP4.error as e:
             return None, f"Login Error: Failed to authenticate with Gmail. {str(e)}"
 
-        # Select the inbox
         try:
-            mail.select("inbox", readonly=True)  # Readonly to avoid modifying emails
+            mail.select("inbox", readonly=True)
         except imaplib.IMAP4.error as e:
             return None, f"IMAP Error: Failed to select inbox. {str(e)}"
 
-        # Search for emails from Netflix containing "sign-in code" within the last hour
         since_date = (datetime.now() - timedelta(hours=1)).strftime("%d-%b-%Y")
-        search_query = f'FROM "info@account.netflix.com" "sign-in code" SINCE {since_date}'
+        search_query = f'FROM "info@account.netflix.com" SUBJECT "sign-in code" SINCE {since_date}'
+        
         try:
-            # Use charset=None to avoid encoding issues, as Gmail typically handles utf-8 by default
             result, data = mail.search(None, search_query)
             if result != "OK":
                 return None, f"IMAP Error: Failed to search for emails. {result}"
@@ -45,7 +40,7 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
         if not email_ids:
             return None, "No recent Netflix sign-in code emails found (within the last hour)."
 
-        email_ids = email_ids[::-1]  # Process most recent emails first
+        email_ids = email_ids[::-1]
 
         for email_id in email_ids:
             try:
@@ -64,8 +59,8 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
                 if date_str:
                     email_date = parsedate_to_datetime(date_str)
                     current_time = datetime.now(email_date.tzinfo)
-                    if current_time - email_date > timedelta(hours=1):
-                        return None, f"The sign-in code for {target_email} has expired (over 1 hour old). Please request a new one."
+                    if current_time - email_date > timedelta(minutes=15):
+                        return None, f"The sign-in code for {target_email} has expired (over 15 minutes old). Please request a new one."
 
                 email_body = ""
                 if msg.is_multipart():
@@ -89,7 +84,7 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
             except imaplib.IMAP4.error:
                 continue
 
-        return None, f"No recent sign-in code emails found addressed to {target_email} (within the last hour)."
+        return None, f"No recent sign-in code emails found addressed to {target_email} (within the last 15 minutes)."
 
     except imaplib.IMAP4.error as e:
         return None, f"IMAP Error: {str(e)}. Unable to connect to the server."
@@ -98,7 +93,7 @@ def extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_e
     finally:
         if mail:
             try:
-                mail.close()  # Close the selected mailbox
-                mail.logout()  # Properly logout
+                mail.close()
+                mail.logout()
             except:
                 pass
