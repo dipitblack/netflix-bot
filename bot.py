@@ -23,10 +23,10 @@ threading.Thread(target=start_health_server, daemon=True).start()
 
 print("The Bot is now active...")
 
-API_ID = os.environ.get("API_ID")
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-ADMIN_ID = int(os.environ.get("ADMIN_ID"))
+API_ID = "19274214"
+API_HASH = "bf87adfbc2c24c66904f3c36f3c0af3a"
+BOT_TOKEN = "7521862287:AAEnZbQv72I6ATVkSWNpBrfQQKBBn7a3ju8"
+ADMIN_ID = "2104057670"
 
 app = Client("netflix_reset_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
